@@ -135,9 +135,97 @@ def find_paragraph_by_text(doc, text, partial_match=False):
     return matching_paragraphs
 
 
+def _replace_in_paragraph_runs(paragraph, old_text, new_text):
+    """
+    Replace text across multiple runs within a single paragraph.
+    
+    This handles the case where Word splits text into separate <w:r> elements
+    due to formatting changes (bold, italic, hyperlinks, etc.), so the search
+    string may span multiple runs.
+    
+    The replacement text inherits the formatting of the first run in the match.
+    
+    Returns:
+        Number of replacements made in this paragraph.
+    """
+    runs = paragraph.runs
+    if not runs:
+        return 0
+
+    count = 0
+    # Keep replacing until no more matches (handles multiple occurrences)
+    while True:
+        # Build a map of character positions to (run_index, offset_within_run)
+        run_texts = [run.text or '' for run in runs]
+        full_text = ''.join(run_texts)
+
+        # Find the next occurrence of old_text in the joined text
+        match_start = full_text.find(old_text)
+        if match_start == -1:
+            break
+
+        match_end = match_start + len(old_text)
+
+        # Build cumulative offset map: run_starts[i] = starting char index of run i
+        run_starts = []
+        offset = 0
+        for rt in run_texts:
+            run_starts.append(offset)
+            offset += len(rt)
+
+        # Find which runs are affected by this match
+        first_run_idx = None
+        last_run_idx = None
+        for i, start in enumerate(run_starts):
+            run_end = start + len(run_texts[i])
+            if first_run_idx is None and run_end > match_start:
+                first_run_idx = i
+            if start < match_end:
+                last_run_idx = i
+
+        if first_run_idx is None or last_run_idx is None:
+            break
+
+        # Perform the replacement across the affected runs
+        if first_run_idx == last_run_idx:
+            # Simple case: match is entirely within one run
+            run = runs[first_run_idx]
+            run.text = run.text.replace(old_text, new_text, 1)
+        else:
+            # Cross-run case: match spans multiple runs
+            first_run = runs[first_run_idx]
+            first_run_start = run_starts[first_run_idx]
+            # Offset within the first run where the match starts
+            offset_in_first = match_start - first_run_start
+            # Text before the match in the first run
+            before = first_run.text[:offset_in_first]
+            # Set first run to: text-before-match + replacement
+            first_run.text = before + new_text
+
+            # Clear text from intermediate runs (fully consumed by the match)
+            for i in range(first_run_idx + 1, last_run_idx):
+                runs[i].text = ''
+
+            # Handle the last run: remove the matched portion, keep the rest
+            last_run = runs[last_run_idx]
+            last_run_start = run_starts[last_run_idx]
+            # How far into the last run the match extends
+            offset_in_last = match_end - last_run_start
+            last_run.text = last_run.text[offset_in_last:]
+
+        count += 1
+        # Re-fetch runs in case the structure changed
+        runs = paragraph.runs
+
+    return count
+
+
 def find_and_replace_text(doc, old_text, new_text):
     """
     Find and replace text throughout the document, skipping Table of Contents (TOC) paragraphs.
+    
+    Handles text that spans multiple XML runs (e.g., when Word splits text due to
+    formatting changes like bold, italic, hyperlinks, etc.).
     
     Args:
         doc: Document object
@@ -155,10 +243,7 @@ def find_and_replace_text(doc, old_text, new_text):
         if para.style and para.style.name.startswith("TOC"):
             continue
         if old_text in para.text:
-            for run in para.runs:
-                if old_text in run.text:
-                    run.text = run.text.replace(old_text, new_text)
-                    count += 1
+            count += _replace_in_paragraph_runs(para, old_text, new_text)
     
     # Search in tables
     for table in doc.tables:
@@ -169,10 +254,7 @@ def find_and_replace_text(doc, old_text, new_text):
                     if para.style and para.style.name.startswith("TOC"):
                         continue
                     if old_text in para.text:
-                        for run in para.runs:
-                            if old_text in run.text:
-                                run.text = run.text.replace(old_text, new_text)
-                                count += 1
+                        count += _replace_in_paragraph_runs(para, old_text, new_text)
     
     return count
 

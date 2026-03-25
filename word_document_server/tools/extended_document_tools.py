@@ -124,45 +124,90 @@ async def convert_to_pdf(filename: str, output_filename: Optional[str] = None) -
                 lo_commands = ["libreoffice", "soffice"]
 
             for cmd_name in lo_commands:
+                # Use a unique temporary user profile for each conversion to avoid
+                # lock file contention when LibreOffice is already running or when
+                # multiple MCP calls happen in quick succession (fixes #26).
+                import tempfile
+                env_dir = tempfile.mkdtemp(prefix="lo_mcp_")
                 try:
                     output_dir_for_lo = os.path.dirname(output_filename) or '.'
                     os.makedirs(output_dir_for_lo, exist_ok=True)
                     
-                    cmd = [cmd_name, '--headless', '--convert-to', 'pdf', '--outdir', output_dir_for_lo, filename]
-                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=60, check=False)
+                    # Use -env:UserInstallation to isolate this instance from any
+                    # running LibreOffice, preventing lock file hangs.
+                    env_uri = f"file://{env_dir}"
+                    cmd = [
+                        cmd_name, '--headless',
+                        f'-env:UserInstallation={env_uri}',
+                        '--convert-to', 'pdf',
+                        '--outdir', output_dir_for_lo,
+                        filename
+                    ]
+                    result = subprocess.run(
+                        cmd, capture_output=True, text=True, timeout=120, check=False
+                    )
 
                     if result.returncode == 0:
-                        # LibreOffice typically creates a PDF with the same base name as the source file.
-                        # e.g., 'mydoc.docx' -> 'mydoc.pdf'
+                        # LibreOffice names the output after the input file's basename.
                         base_name = os.path.splitext(os.path.basename(filename))[0]
                         created_pdf_name = f"{base_name}.pdf"
                         created_pdf_path = os.path.join(output_dir_for_lo, created_pdf_name)
 
-                        # If the created file exists, move it to the desired output_filename if necessary.
+                        # Move to desired output_filename if the name differs.
                         if os.path.exists(created_pdf_path):
-                            if created_pdf_path != output_filename:
+                            if os.path.abspath(created_pdf_path) != os.path.abspath(output_filename):
                                 shutil.move(created_pdf_path, output_filename)
                             
-                            # Final check: does the target file now exist?
                             if os.path.exists(output_filename):
-                                return f"Document successfully converted to PDF via {cmd_name}: {output_filename}"
+                                abs_path = os.path.abspath(output_filename)
+                                size_kb = os.path.getsize(abs_path) / 1024
+                                return (
+                                    f"Document successfully converted to PDF via {cmd_name}.\n"
+                                    f"Output: {abs_path} ({size_kb:.1f} KB)"
+                                )
                         
-                        # If we get here, soffice returned 0 but the expected file wasn't created.
-                        errors.append(f"{cmd_name} returned success code, but output file '{created_pdf_path}' was not found.")
-                        # Continue to the next command or fallback.
+                        # soffice returned 0 but no file was created — this is a known
+                        # LibreOffice issue (e.g., font errors, corrupt input).
+                        stderr_hint = result.stderr.strip()[:200] if result.stderr else "no stderr"
+                        stdout_hint = result.stdout.strip()[:200] if result.stdout else "no stdout"
+                        errors.append(
+                            f"{cmd_name} returned exit code 0 but output file "
+                            f"'{created_pdf_path}' was not found. "
+                            f"stdout: [{stdout_hint}] stderr: [{stderr_hint}]"
+                        )
                     else:
-                        errors.append(f"{cmd_name} failed. Stderr: {result.stderr.strip()}")
+                        errors.append(
+                            f"{cmd_name} failed with exit code {result.returncode}. "
+                            f"Stderr: {result.stderr.strip()[:300]}"
+                        )
                 except FileNotFoundError:
                     errors.append(f"Command '{cmd_name}' not found.")
-                except (subprocess.SubprocessError, Exception) as e:
+                except subprocess.TimeoutExpired:
+                    errors.append(
+                        f"{cmd_name} timed out after 120 seconds. "
+                        f"This may happen if another LibreOffice instance is running. "
+                        f"Try closing all LibreOffice windows and retry."
+                    )
+                except Exception as e:
                     errors.append(f"An error occurred with {cmd_name}: {str(e)}")
+                finally:
+                    # Clean up the temporary user profile
+                    try:
+                        shutil.rmtree(env_dir, ignore_errors=True)
+                    except Exception:
+                        pass
             
             # --- Attempt 2: docx2pdf (Fallback) ---
             try:
                 from docx2pdf import convert
                 convert(filename, output_filename)
                 if os.path.exists(output_filename) and os.path.getsize(output_filename) > 0:
-                    return f"Document successfully converted to PDF via docx2pdf: {output_filename}"
+                    abs_path = os.path.abspath(output_filename)
+                    size_kb = os.path.getsize(abs_path) / 1024
+                    return (
+                        f"Document successfully converted to PDF via docx2pdf.\n"
+                        f"Output: {abs_path} ({size_kb:.1f} KB)"
+                    )
                 else:
                     errors.append("docx2pdf fallback was executed but failed to create a valid output file.")
             except ImportError:
@@ -172,8 +217,10 @@ async def convert_to_pdf(filename: str, output_filename: Optional[str] = None) -
 
             # --- If all attempts failed ---
             error_summary = "Failed to convert document to PDF using all available methods.\n"
-            error_summary += "Recorded errors: " + "; ".join(errors) + "\n"
-            error_summary += "To convert documents to PDF, please install either:\n"
+            error_summary += "Recorded errors:\n"
+            for i, err in enumerate(errors, 1):
+                error_summary += f"  {i}. {err}\n"
+            error_summary += "\nTo convert documents to PDF, please install either:\n"
             error_summary += "1. LibreOffice (recommended for Linux/macOS)\n"
             error_summary += "2. Microsoft Word (required for docx2pdf on Windows/macOS)"
             return error_summary

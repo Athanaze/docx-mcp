@@ -70,16 +70,65 @@ def create_document_copy(source_path: str, dest_path: Optional[str] = None) -> T
         return False, f"Failed to copy document: {str(e)}", None
 
 
+def get_document_root() -> Optional[str]:
+    """
+    Get the document root directory from the DOCUMENT_ROOT environment variable.
+    
+    When set, all relative file paths passed to MCP tools will be resolved
+    relative to this directory instead of the server's current working directory.
+    This is critical for deployments via uvx, Claude Desktop, or any environment
+    where the server's CWD is unpredictable.
+    
+    Returns:
+        The absolute path to the document root, or None if not set.
+    """
+    root = os.environ.get('DOCUMENT_ROOT', '').strip()
+    if root:
+        root = os.path.abspath(os.path.expanduser(root))
+        os.makedirs(root, exist_ok=True)
+        return root
+    return None
+
+
+def resolve_document_path(filepath: str) -> str:
+    """
+    Resolve a file path against DOCUMENT_ROOT if it is a relative path.
+    
+    - If the path is already absolute, return it as-is.
+    - If DOCUMENT_ROOT is set and the path is relative, resolve against DOCUMENT_ROOT.
+    - Otherwise, resolve against the current working directory (original behavior).
+    
+    Args:
+        filepath: The file path to resolve
+        
+    Returns:
+        Absolute file path
+    """
+    if os.path.isabs(filepath):
+        return filepath
+    
+    root = get_document_root()
+    if root:
+        return os.path.join(root, filepath)
+    
+    return os.path.abspath(filepath)
+
+
 def ensure_docx_extension(filename: str) -> str:
     """
-    Ensure filename has .docx extension.
+    Ensure filename has .docx extension and resolve against DOCUMENT_ROOT.
+    
+    This is the central path resolution point for all MCP tools.
+    When DOCUMENT_ROOT is set, relative paths like "report.docx" will be
+    resolved to "$DOCUMENT_ROOT/report.docx" instead of the server's CWD.
     
     Args:
         filename: The filename to check
         
     Returns:
-        Filename with .docx extension
+        Absolute filename with .docx extension
     """
     if not filename.endswith('.docx'):
-        return filename + '.docx'
-    return filename
+        filename = filename + '.docx'
+    return resolve_document_path(filename)
+
