@@ -25,6 +25,7 @@ from word_document_server.operations.numbering import (
 from word_document_server.operations.blocks import (
     get_block_items, resolve_block, resolve_paragraph_block,
     resolve_table_block, find_block, normalize_text,
+    word_count_from_blocks,
 )
 from word_document_server.operations.helpers import (
     parse_color, apply_run_format, resolve_list_style,
@@ -75,6 +76,7 @@ def create_document(doc, filename, title=None, author=None):
 def get_document_info(doc, filename):
     props = doc.core_properties
     items = get_block_items(doc)
+    paragraph_walk_words = sum(len((p.text or "").split()) for p in doc.paragraphs)
     return json.dumps({
         "title": props.title or "",
         "author": props.author or "",
@@ -85,21 +87,57 @@ def get_document_info(doc, filename):
         "last_modified_by": props.last_modified_by or "",
         "revision": props.revision or 0,
         "section_count": len(doc.sections),
-        "word_count": sum(len(p.text.split()) for p in doc.paragraphs),
+        "word_count": word_count_from_blocks(doc),
+        "word_count_paragraph_walk": paragraph_walk_words,
         "block_count": len(items),
         "paragraph_count": len(doc.paragraphs),
         "table_count": len(doc.tables),
     }, indent=2)
 
 
+def _truncate_cell_text(text, max_chars):
+    if max_chars is None or text is None:
+        return text or ""
+    text = str(text)
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + "…"
+
+
+def _serialize_table_row_cells(cells, max_cells_per_row, max_chars_per_cell):
+    cells = [_truncate_cell_text(c, max_chars_per_cell) for c in cells]
+    n = len(cells)
+    if max_cells_per_row is not None and n > max_cells_per_row:
+        extra = n - max_cells_per_row
+        cells = cells[:max_cells_per_row] + [f"(+{extra} cells)"]
+    return cells
+
+
 @docx_tool(readonly=True)
-def get_document_text(doc, filename, include_indices=True):
+def get_document_text(
+    doc,
+    filename,
+    include_indices=True,
+    max_table_rows=None,
+    max_cells_per_row=None,
+    max_chars_per_cell=None,
+):
     """Extract text from a Word document in document order.
 
     Every block item (paragraph, heading, list item, table) gets a unified
     block_index shown as [N]. Use this index with all tools (format_text,
     delete_block, insert_content, add_table_row, etc.).
+
+    Optional limits (default None = no limit) reduce noise on huge/nested tables:
+    max_table_rows, max_cells_per_row, max_chars_per_cell.
     """
+    if max_table_rows is not None:
+        max_table_rows = max(1, int(max_table_rows))
+    if max_cells_per_row is not None:
+        max_cells_per_row = max(1, int(max_cells_per_row))
+    if max_chars_per_cell is not None:
+        max_chars_per_cell = max(1, int(max_chars_per_cell))
+
     items = get_block_items(doc)
     lines = []
     for bi in items:
@@ -107,8 +145,21 @@ def get_document_text(doc, filename, include_indices=True):
             tbl = bi.obj
             if include_indices:
                 lines.append(f"[{bi.index}] (Table {len(tbl.rows)}x{len(tbl.columns)})")
+            n_rows = len(tbl.rows)
             for ri, row in enumerate(tbl.rows):
-                cells = [row.cells[ci].text for ci in range(len(tbl.columns))]
+                if max_table_rows is not None and ri >= max_table_rows:
+                    omitted = n_rows - max_table_rows
+                    suffix = f"    [... {omitted} more rows omitted]"
+                    if not include_indices:
+                        suffix = f"[... {omitted} more table rows omitted]"
+                    lines.append(suffix)
+                    break
+                # Row length can be less than tbl.columns when the grid uses
+                # merged / irregular rows (e.g. Calibre DOCX torture-test).
+                raw_cells = [row.cells[ci].text for ci in range(len(row.cells))]
+                cells = _serialize_table_row_cells(
+                    raw_cells, max_cells_per_row, max_chars_per_cell,
+                )
                 if include_indices:
                     lines.append(f"    Row {ri}: " + " | ".join(cells))
                 else:
@@ -128,21 +179,26 @@ def get_document_text(doc, filename, include_indices=True):
 
 
 @docx_tool(readonly=True)
-def get_document_outline(doc, filename):
+def get_document_outline(doc, filename, max_blocks=None):
+    """Structured view of all blocks. Use max_blocks to cap response size on huge docs."""
     items = get_block_items(doc)
+    n_items = len(items)
+    cap = None if max_blocks is None else max(1, int(max_blocks))
     blocks = []
     for bi in items:
+        if cap is not None and len(blocks) >= cap:
+            break
         if bi.type == "table":
             tbl = bi.obj
             preview = []
             for ri in range(min(3, len(tbl.rows))):
+                row = tbl.rows[ri]
                 row_data = []
-                for ci in range(min(3, len(tbl.columns))):
-                    try:
-                        t = tbl.cell(ri, ci).text
-                        row_data.append(t[:20] + ("..." if len(t) > 20 else ""))
-                    except IndexError:
-                        row_data.append("N/A")
+                for ci, cell in enumerate(row.cells):
+                    if ci >= 3:
+                        break
+                    t = cell.text
+                    row_data.append(t[:20] + ("..." if len(t) > 20 else ""))
                 preview.append(row_data)
             blocks.append({
                 "block_index": bi.index, "type": "table",
@@ -155,7 +211,10 @@ def get_document_outline(doc, filename):
                 "text": bi.obj.text[:100] + ("..." if len(bi.obj.text) > 100 else ""),
                 "style": bi.obj.style.name if bi.obj.style else "Normal",
             })
-    return json.dumps({"blocks": blocks}, indent=2)
+    payload = {"blocks": blocks, "total_block_count": n_items, "returned_blocks": len(blocks)}
+    if cap is not None and len(blocks) < n_items:
+        payload["truncated"] = True
+    return json.dumps(payload, indent=2)
 
 
 def _run_to_dict(run):
@@ -588,6 +647,8 @@ def move_block(doc, filename, source_index, target_index, position="after"):
 
 @docx_tool()
 def search_and_replace(doc, filename, find_text, replace_text):
+    if not find_text:
+        return "find_text must not be empty"
     count = 0
     for para in doc.paragraphs:
         if para.style and para.style.name.startswith("TOC"):
@@ -608,15 +669,29 @@ def search_and_replace(doc, filename, find_text, replace_text):
 
 
 def _replace_in_runs(paragraph, old_text, new_text):
-    """Cross-run text replacement preserving formatting."""
+    """Cross-run text replacement preserving formatting.
+
+    Searches left-to-right; after each replacement, continues *after* the new
+    text so we never match inside the inserted string (avoids infinite loops
+    when new_text contains old_text as a substring).
+    """
     runs = paragraph.runs
     if not runs:
         return 0
     count = 0
+    search_pos = 0
+    # Hard cap so a future logic bug cannot hang the MCP server indefinitely.
+    _max_iter = 500_000
+    iteration = 0
     while True:
+        iteration += 1
+        if iteration > _max_iter:
+            raise RuntimeError(
+                "search/replace exceeded iteration cap; report this as a bug"
+            )
         texts = [r.text or '' for r in runs]
         full = ''.join(texts)
-        start = full.find(old_text)
+        start = full.find(old_text, search_pos)
         if start == -1:
             break
         end = start + len(old_text)
@@ -635,7 +710,13 @@ def _replace_in_runs(paragraph, old_text, new_text):
         if first_ri is None or last_ri is None:
             break
         if first_ri == last_ri:
-            runs[first_ri].text = runs[first_ri].text.replace(old_text, new_text, 1)
+            # Do not use str.replace(1): it always hits the *leftmost* match in this
+            # run, ignoring search_pos (breaks multiple occurrences per paragraph).
+            t = runs[first_ri].text or ''
+            off_in_run = start - offsets[first_ri]
+            runs[first_ri].text = (
+                t[:off_in_run] + new_text + t[off_in_run + len(old_text):]
+            )
         else:
             off_in_first = start - offsets[first_ri]
             runs[first_ri].text = runs[first_ri].text[:off_in_first] + new_text
@@ -644,17 +725,28 @@ def _replace_in_runs(paragraph, old_text, new_text):
             off_in_last = end - offsets[last_ri]
             runs[last_ri].text = runs[last_ri].text[off_in_last:]
         count += 1
+        if new_text:
+            search_pos = start + len(new_text)
+        else:
+            # Deletion: next possible match begins where deleted region was.
+            search_pos = start
         runs = paragraph.runs
     return count
 
 
 @docx_tool(readonly=True)
-def find_text(doc, filename, text_to_find, match_case=True, whole_word=False):
-    """Find text in paragraphs and table cells. Returns block_index for each match."""
+def find_text(doc, filename, text_to_find, match_case=True, whole_word=False,
+              max_results=None):
+    """Find text in paragraphs and table cells. Returns block_index for each match.
+
+    max_results: if set, only the first N matches are included in ``matches``,
+    but ``count`` is still the total number of hits in the document.
+    """
     import re as _re
     results = []
     if not text_to_find:
-        return json.dumps({"matches": results, "count": 0}, indent=2)
+        return json.dumps({"matches": results, "count": 0, "returned": 0}, indent=2)
+    cap = None if max_results is None else max(1, int(max_results))
     search = text_to_find if match_case else text_to_find.lower()
     items = get_block_items(doc)
 
@@ -664,21 +756,33 @@ def find_text(doc, filename, text_to_find, match_case=True, whole_word=False):
             return bool(_re.search(r'\b' + _re.escape(search) + r'\b', t))
         return search in t
 
+    total = 0
     for bi in items:
         if bi.type == "table":
             for ri, row in enumerate(bi.obj.rows):
                 for ci, cell in enumerate(row.cells):
                     if _matches(cell.text):
-                        results.append({
-                            "block_index": bi.index, "type": "table_cell",
-                            "row": ri, "col": ci,
-                            "text": cell.text[:100],
-                        })
+                        total += 1
+                        if cap is None or len(results) < cap:
+                            results.append({
+                                "block_index": bi.index, "type": "table_cell",
+                                "row": ri, "col": ci,
+                                "text": cell.text[:100],
+                            })
         else:
             if _matches(bi.obj.text):
-                results.append({"block_index": bi.index, "type": bi.type,
-                                "text": bi.obj.text[:100]})
-    return json.dumps({"matches": results, "count": len(results)}, indent=2)
+                total += 1
+                if cap is None or len(results) < cap:
+                    results.append({"block_index": bi.index, "type": bi.type,
+                                    "text": bi.obj.text[:100]})
+    out = {
+        "matches": results,
+        "count": total,
+        "returned": len(results),
+    }
+    if cap is not None and total > len(results):
+        out["truncated"] = True
+    return json.dumps(out, indent=2)
 
 
 # ---------------------------------------------------------------------------

@@ -10,6 +10,7 @@ from docx import Document
 from word_document_server.operations.content import add_paragraph, add_heading
 from word_document_server.operations.footnotes import (
     add_footnote, delete_footnote, validate_footnotes,
+    customize_footnote_style,
 )
 
 W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
@@ -193,3 +194,15 @@ class TestFootnotePositioning:
 
             assert "Smith v. Jones" in text_before
             assert "for the ruling" in text_after
+
+
+class TestCustomizeFootnoteStyle:
+    def test_updates_style(self, blank_docx):
+        r = customize_footnote_style(
+            blank_docx, font_name="Courier New", font_size=9,
+        )
+        assert "footnote" in r.lower() and "updated" in r.lower()
+        doc = Document(blank_docx)
+        st = doc.styles["Footnote Text"]
+        assert st.font.name == "Courier New"
+        assert st.font.size.pt == 9

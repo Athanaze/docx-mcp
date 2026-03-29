@@ -1,433 +1,87 @@
-# Office-Word-MCP-Server
+# Office Word MCP Server
 
-[![smithery badge](https://smithery.ai/badge/@GongRzhe/Office-Word-MCP-Server)](https://smithery.ai/server/@GongRzhe/Office-Word-MCP-Server)
+MCP (Model Context Protocol) server for **.docx** files: create, read, edit, tables, lists, footnotes, comments, PDF export, and PNG preview (via LibreOffice + poppler where installed).
 
-A Model Context Protocol (MCP) server for creating, reading, and manipulating Microsoft Word documents. This server enables AI assistants to work with Word documents through a standardized interface, providing rich document editing capabilities.
+Implementation: **[python-docx](https://python-docx.readthedocs.io/)** + **[FastMCP](https://github.com/jlowin/fastmcp)**. Block-level content is addressed with a single **`block_index`** in document order (paragraphs, headings, list items, tables). See [`word_document_server/operations/`](word_document_server/operations/) and tool registration in [`word_document_server/server.py`](word_document_server/server.py).
 
-<a href="https://glama.ai/mcp/servers/@GongRzhe/Office-Word-MCP-Server">
-  <img width="380" height="200" src="https://glama.ai/mcp/servers/@GongRzhe/Office-Word-MCP-Server/badge" alt="Office Word Server MCP server" />
-</a>
+## Running the server
 
-![](https://badge.mcpx.dev?type=server "MCP Server")
+**Default — stdio** (typical for editors and agents that launch an MCP process):
 
-## Overview
+```bash
+uv sync --extra dev
+uv run word_mcp_server
+# or: python word_mcp_server.py
+```
 
-Office-Word-MCP-Server implements the [Model Context Protocol](https://modelcontextprotocol.io/) to expose Word document operations as tools and resources. It serves as a bridge between AI assistants and Microsoft Word documents, allowing for document creation, content addition, formatting, and analysis.
+Configure your MCP client with the command above and working directory set to where your documents should live (or use `DOCUMENT_ROOT`; see below).
 
-The server uses a single operations layer ([`word_document_server/operations/`](word_document_server/operations/)) with a unified **`block_index`** for every block-level item (paragraphs, headings, list items, tables) in document order.
-
-## Transports: stdio (desktop) vs HTTP (remote)
-
-| Mode | Use case |
-|------|-----------|
-| **stdio** (default) | Cursor, Claude Desktop, local MCP hosts that spawn a process |
-| **Streamable HTTP** | Remote agents, OpenClaw-style hosts, multiple clients, Docker |
-
-### Environment variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MCP_TRANSPORT` | `stdio` | `stdio`, `streamable-http`, or `sse` (legacy) |
-| `MCP_HOST` | `0.0.0.0` | Bind address for HTTP transports |
-| `PORT` / `MCP_PORT` | `8000` | Listen port for HTTP transports |
-| `MCP_PATH` | `/mcp` | HTTP path for Streamable HTTP |
-| `MCP_SSE_PATH` | `/sse` | Path when using `MCP_TRANSPORT=sse` |
-| `DOCUMENT_ROOT` | _(unset)_ | If set, all `.docx` paths are confined to this directory (recommended for servers) |
-
-### HTTP quick start (built-in server)
+**Optional — HTTP** on the same machine or a trusted network:
 
 ```bash
 export MCP_TRANSPORT=streamable-http
 export MCP_HOST=127.0.0.1
 export MCP_PORT=8000
-export DOCUMENT_ROOT="$(pwd)/workspace"
-word_mcp_server
+export DOCUMENT_ROOT="$(pwd)/workspace"   # optional sandbox for paths
+uv run word_mcp_server
 ```
 
-MCP endpoint: **`http://<host>:<port>/mcp`** (e.g. `http://127.0.0.1:8000/mcp`).  
-Configure your MCP client for **Streamable HTTP** to this URL. Legacy clients may need `MCP_TRANSPORT=sse`.
+Endpoint: `http://<host>:<port>/mcp` (default path; override with `MCP_PATH`). Legacy SSE: `MCP_TRANSPORT=sse` and `MCP_SSE_PATH`.
 
-**Security:** For **local** HTTP (`127.0.0.1`) or **stdio**, you do not need TLS or encryption from this server—that is outside its scope. If you expose the HTTP endpoint **beyond your machine**, add your own auth/TLS at the edge. See [SECURITY.md](SECURITY.md).
+| Variable | Default | Meaning |
+|----------|---------|--------|
+| `MCP_TRANSPORT` | `stdio` | `stdio`, `streamable-http`, or `sse` |
+| `MCP_HOST` / `PORT` / `MCP_PORT` | `0.0.0.0` / `8000` | HTTP bind (when not using stdio) |
+| `MCP_PATH` | `/mcp` | Streamable HTTP path |
+| `DOCUMENT_ROOT` | _(unset)_ | If set, `.docx` paths are confined under this directory |
 
-### HTTP with Uvicorn (ASGI)
+Local stdio or `127.0.0.1` HTTP does not add TLS; that is up to your environment if you expose the service. See [SECURITY.md](SECURITY.md).
 
-For production-style deployments (workers, process managers):
+## Requirements
+
+- **Python 3.11+**
+- **PDF / PNG preview:** LibreOffice (`soffice` / `libreoffice`) and `pdftoppm` (poppler)
+
+## Install
 
 ```bash
-uv sync --extra asgi
-export DOCUMENT_ROOT="$(pwd)/workspace"
-uvicorn word_document_server.asgi:app --host 0.0.0.0 --port 8000
+git clone https://github.com/Athanaze/docx-mcp.git
+cd docx-mcp
+uv sync --extra dev
 ```
 
-### Docker
+Or: `pip install -e ".[dev]"` in a virtualenv.
 
-```bash
-docker compose up --build
-```
+## What the tools cover (summary)
 
-The container listens on port **8000** and uses `/workspace` as `DOCUMENT_ROOT` (mounted from `./workspace` in the sample [docker-compose.yml](docker-compose.yml)).
+- **Lifecycle:** create/copy/merge documents, list files, metadata, raw XML dump
+- **Reading:** `get_document_text`, `get_document_outline`, `get_blocks` (structured JSON), `find_text` (body + table cells)
+- **Writing:** headings, paragraphs, lists, tables, images, page breaks, TOC field, `insert_content` / `delete_block` / `move_block`, search-and-replace
+- **Formatting:** runs and table cells, custom styles, table layout (widths, merge, shading, alignment, auto-fit)
+- **Footnotes:** add/delete/validate, footnote text style
+- **Comments:** list and add (by `block_index`)
+- **Export:** `convert_to_pdf`, `preview_document` (PNG pages for visual check)
 
-### Example
+Exact names and parameters match what your MCP client lists from the server—there is no separate Python API doc in this file.
 
-#### Pormpt
+## Troubleshooting (current behaviour)
 
-![image](https://github.com/user-attachments/assets/f49b0bcc-88b2-4509-bf50-995b9a40038c)
+These are **not** bugs to “fix” in code unless we extend features; they reflect how Word files and the stack behave:
 
-#### Output
-
-![image](https://github.com/user-attachments/assets/ff64385d-3822-4160-8cdf-f8a484ccc01a)
-
-## Features
-
-### Document Management
-
-- Create new Word documents with metadata
-- Extract text and analyze document structure
-- **`get_blocks`**: structured JSON per block (text, style, per-run formatting, or full table cell matrix) for agent workflows
-- **`list_document_styles`** / **`set_paragraph_style`**: discover and apply built-in or template styles by name
-- View document properties and statistics
-- List available documents in a directory
-- Create copies of existing documents
-- Merge multiple documents into a single document
-- Convert Word documents to PDF format
-
-### Content Creation
-
-- Add headings with different levels and direct formatting (font, size, bold, italic, borders)
-- Insert paragraphs with optional styling and direct formatting (font, size, bold, italic, color)
-- Create tables with custom data
-- Add images with proportional scaling
-- Insert page breaks
-- Insert bulleted and numbered lists with proper XML formatting
-- Add footnotes and endnotes to documents
-- Convert footnotes to endnotes
-- Customize footnote and endnote styling
-- Create professional table layouts for technical documentation
-- Design callout boxes and formatted content for instructional materials
-- Build structured data tables for business reports with consistent styling
-- Insert content relative to existing text or paragraph indices
-
-### Rich Text Formatting
-
-- Format specific text sections (bold, italic, underline)
-- Change text color and font properties
-- Apply custom styles to text elements
-- Search and replace text throughout documents
-- Individual cell text formatting within tables
-- Multiple formatting combinations for enhanced visual appeal
-- Font customization with family and size control
-- Direct formatting during content creation (paragraphs and headings)
-- Reduce function calls by combining content creation with formatting
-- Add section header borders for visual separation
-
-### Table Formatting
-
-- Format tables with borders and styles
-- Create header rows with distinct formatting
-- Apply cell shading and custom borders
-- Structure tables for better readability
-- Individual cell background shading with color support
-- Alternating row colors for improved readability
-- Enhanced header row highlighting with custom colors
-- Cell text formatting with bold, italic, underline, color, font size, and font family
-- Comprehensive color support with named colors and hex color codes
-- Cell padding management with independent control of all sides
-- Cell alignment (horizontal and vertical positioning)
-- Cell merging (horizontal, vertical, and rectangular areas)
-- Column width management with multiple units (points, percentage, auto-fit)
-- Auto-fit capabilities for dynamic column sizing
-- Professional callout table support with icon cells and styled content
-
-### Advanced Document Manipulation
-
-- Delete paragraphs
-- Insert content relative to specific text or paragraph indices
-- Insert bulleted and numbered lists with proper XML numbering structure
-- Insert headers and paragraphs before or after target locations
-- Create custom document styles
-- Apply consistent formatting throughout documents
-- Format specific ranges of text with detailed control
-- Flexible padding units with support for points and percentage-based measurements
-- Clear, readable table presentation with proper alignment and spacing
-
-### Document Protection
-
-- Add password protection to documents
-- Implement restricted editing with editable sections
-- Add digital signatures to documents
-- Verify document authenticity and integrity
-
-### Comment Extraction
-
-- Extract all comments from a document
-- Filter comments by author
-- Get comments for specific paragraphs
-- Access comment metadata (author, date, text)
-
-## Installation
-
-### Installing via Smithery
-
-To install Office Word Document Server for Claude Desktop automatically via [Smithery](https://smithery.ai/server/@GongRzhe/Office-Word-MCP-Server):
-
-```bash
-npx -y @smithery/cli install @GongRzhe/Office-Word-MCP-Server --client claude
-```
-
-### Prerequisites
-
-- Python 3.11 or higher
-- Optional: [uv](https://github.com/astral-sh/uv) for reproducible installs
-
-### Basic installation
-
-```bash
-git clone https://github.com/GongRzhe/Office-Word-MCP-Server.git
-cd Office-Word-MCP-Server
-
-# Editable install + dev tools (pytest, pytest-asyncio)
-uv sync --extra dev --extra asgi
-
-# Or with pip
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev,asgi]"
-```
-
-Run the server: `word_mcp_server` (or `python word_mcp_server.py`).
-
-## Usage with Claude for Desktop
-
-### Configuration
-
-#### Method 1: After Local Installation
-
-1. After installation, add the server to your Claude for Desktop configuration file:
-
-```json
-{
-  "mcpServers": {
-    "word-document-server": {
-      "command": "python",
-      "args": ["/path/to/word_mcp_server.py"]
-    }
-  }
-}
-```
-
-#### Method 2: Without Installation (Using uvx)
-
-1. You can also configure Claude for Desktop to use the server without local installation by using the uvx package manager:
-
-```json
-{
-  "mcpServers": {
-    "word-document-server": {
-      "command": "uvx",
-      "args": ["--from", "office-word-mcp-server", "word_mcp_server"]
-    }
-  }
-}
-```
-
-2. Configuration file locations:
-
-   - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
-   - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
-
-3. Restart Claude for Desktop to load the configuration.
-
-### Example Operations
-
-Once configured, you can ask Claude to perform operations like:
-
-- "Create a new document called 'report.docx' with a title page"
-- "Add a heading and three paragraphs to my document"
-- "Add my name in Helvetica 36pt bold at the top of the document"
-- "Add a section heading 'Summary' in Helvetica 14pt bold with a bottom border"
-- "Add a paragraph in Times New Roman 14pt with italic blue text"
-- "Insert a bulleted list after the paragraph containing 'Introduction'"
-- "Insert a numbered list with items: 'First step', 'Second step', 'Third step'"
-- "Add bullet points after the 'Summary' heading"
-- "Insert a 4x4 table with sales data"
-- "Format the word 'important' in paragraph 2 to be bold and red"
-- "Search and replace all instances of 'old term' with 'new term'"
-- "Create a custom style for section headings"
-- "Apply formatting to the table in my document"
-- "Extract all comments from my document"
-- "Show me all comments by John Doe"
-- "Get comments for paragraph 3"
-- "Make the text in table cell (1,2) bold and blue with 14pt font"
-- "Add 10 points of padding to all sides of the header cells"
-- "Create a callout table with a blue checkmark icon and white text"
-- "Set the first column width to 50 points and auto-fit the remaining columns"
-- "Apply alternating row colors to make the table more readable"
-
-
-## API Reference
-
-### Document Creation and Properties
-
-```python
-create_document(filename, title=None, author=None)
-get_document_info(filename)
-get_document_text(filename)
-get_document_outline(filename)
-list_available_documents(directory=".")
-copy_document(source_filename, destination_filename=None)
-convert_to_pdf(filename, output_filename=None)
-```
-
-### Content Addition
-
-```python
-add_heading(filename, text, level=1, font_name=None, font_size=None,
-            bold=None, italic=None, border_bottom=False)
-add_paragraph(filename, text, style=None, font_name=None, font_size=None,
-              bold=None, italic=None, color=None)
-add_table(filename, rows, cols, data=None)
-add_picture(filename, image_path, width=None)
-add_page_break(filename)
-```
-
-### Advanced Content Manipulation
-
-```python
-# Insert content relative to existing text or paragraph index
-insert_header_near_text(filename, target_text=None, header_title=None,
-                       position='after', header_style='Heading 1',
-                       target_paragraph_index=None)
-
-insert_line_or_paragraph_near_text(filename, target_text=None, line_text=None,
-                                   position='after', line_style=None,
-                                   target_paragraph_index=None)
-
-# Insert bulleted or numbered lists with proper XML formatting
-insert_numbered_list_near_text(filename, target_text=None, list_items=None,
-                              position='after', target_paragraph_index=None,
-                              bullet_type='bullet')
-# bullet_type options:
-#   'bullet' - Creates bulleted list with bullets (•)
-#   'number' - Creates numbered list (1, 2, 3, ...)
-```
-
-### Content Extraction
-
-```python
-get_document_text(filename)
-get_paragraph_text_from_document(filename, paragraph_index)
-find_text_in_document(filename, text_to_find, match_case=True, whole_word=False)
-```
-
-### Text Formatting
-
-```python
-format_text(filename, paragraph_index, start_pos, end_pos, bold=None,
-            italic=None, underline=None, color=None, font_size=None, font_name=None)
-search_and_replace(filename, find_text, replace_text)
-delete_paragraph(filename, paragraph_index)
-create_custom_style(filename, style_name, bold=None, italic=None,
-                    font_size=None, font_name=None, color=None, base_style=None)
-```
-
-### Table Formatting
-
-```python
-format_table(filename, table_index, has_header_row=None,
-             border_style=None, shading=None)
-set_table_cell_shading(filename, table_index, row_index, col_index, 
-                      fill_color, pattern="clear")
-apply_table_alternating_rows(filename, table_index, 
-                            color1="FFFFFF", color2="F2F2F2")
-highlight_table_header(filename, table_index, 
-                      header_color="4472C4", text_color="FFFFFF")
-
-# Cell merging tools
-merge_table_cells(filename, table_index, start_row, start_col, end_row, end_col)
-merge_table_cells_horizontal(filename, table_index, row_index, start_col, end_col)
-merge_table_cells_vertical(filename, table_index, col_index, start_row, end_row)
-
-# Cell alignment tools
-set_table_cell_alignment(filename, table_index, row_index, col_index,
-                        horizontal="left", vertical="top")
-set_table_alignment_all(filename, table_index, 
-                       horizontal="left", vertical="top")
-
-# Cell text formatting tools
-format_table_cell_text(filename, table_index, row_index, col_index,
-                      text_content=None, bold=None, italic=None, underline=None,
-                      color=None, font_size=None, font_name=None)
-
-# Cell padding tools
-set_table_cell_padding(filename, table_index, row_index, col_index,
-                      top=None, bottom=None, left=None, right=None, unit="points")
-
-# Column width management
-set_table_column_width(filename, table_index, col_index, width, width_type="points")
-set_table_column_widths(filename, table_index, widths, width_type="points")
-set_table_width(filename, table_index, width, width_type="points")
-auto_fit_table_columns(filename, table_index)
-```
-
-### Comment Extraction
-
-```python
-get_all_comments(filename)
-get_comments_by_author(filename, author)
-get_comments_for_paragraph(filename, paragraph_index)
-```
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Missing Styles**
-
-   - Some documents may lack required styles for heading and table operations
-   - The server will attempt to create missing styles or use direct formatting
-   - For best results, use templates with standard Word styles
-
-2. **Permission Issues**
-
-   - Ensure the server has permission to read/write to the document paths
-   - Use the `copy_document` function to create editable copies of locked documents
-   - Check file ownership and permissions if operations fail
-
-3. **Image Insertion Problems**
-   - Use absolute paths for image files
-   - Verify image format compatibility (JPEG, PNG recommended)
-   - Check image file size and permissions
-
-4. **Table Formatting Issues**
-
-   - **Cell index errors**: Ensure row and column indices are within table bounds (0-based indexing)
-   - **Color format problems**: Use hex colors without '#' prefix (e.g., "FF0000" for red) or standard color names
-   - **Padding unit confusion**: Specify "points" or "percent" explicitly when setting cell padding
-   - **Column width conflicts**: Auto-fit may override manual column width settings
-   - **Text formatting persistence**: Apply cell text formatting after setting cell content for best results
-
-### Debugging
-
-Enable detailed logging by setting the environment variable:
-
-```bash
-export MCP_DEBUG=1  # Linux/macOS
-set MCP_DEBUG=1     # Windows
-```
+1. **Styles** — Templates with normal Word styles behave most predictably. If a style is missing, many tools still apply **direct** formatting or fall back to available styles.
+2. **Read-only files** — Saves fail with a clear error; use **`copy_document`** then edit the copy.
+3. **Images** — `image_path` is resolved like other files (`DOCUMENT_ROOT` applies when set). Use paths the server process can read; formats depend on **python-docx** / Pillow.
+4. **Colours** — **`#RRGGBB` or `RRGGBB`** and named colours (`red`, `blue`, …) are accepted (see [`helpers.parse_color`](word_document_server/operations/helpers.py)).
+5. **Tables** — Rows/columns are **0-based**. **`block_index`** identifies the whole table in the document. Auto-fit vs fixed widths follows OOXML; changing layout can interact with manual widths.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, tests (including optional HTTP E2E), and roadmap.
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT — see [LICENSE](LICENSE).
 
-## Acknowledgments
+## Acknowledgements
 
-- [Model Context Protocol](https://modelcontextprotocol.io/) for the protocol specification
-- [python-docx](https://python-docx.readthedocs.io/) for Word document manipulation
-- [FastMCP](https://github.com/modelcontextprotocol/python-sdk) for the Python MCP implementation
-
----
-
-_Note: This server interacts with document files on your system. Always verify that requested operations are appropriate before confirming them in Claude for Desktop or other MCP clients._
+[MCP](https://modelcontextprotocol.io/), [python-docx](https://python-docx.readthedocs.io/), [FastMCP](https://github.com/jlowin/fastmcp).

@@ -7,7 +7,7 @@ Python **3.11+** is required.
 Using [uv](https://github.com/astral-sh/uv) (recommended):
 
 ```bash
-uv sync --extra dev --extra asgi
+uv sync --extra dev
 ```
 
 Or with pip:
@@ -15,7 +15,7 @@ Or with pip:
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev,asgi]"
+pip install -e ".[dev]"
 ```
 
 ## Tests
@@ -30,7 +30,6 @@ uv run pytest tests/ -q
 
 - [`word_document_server/server.py`](word_document_server/server.py) — MCP tool registration (`register_tools()`).
 - [`word_document_server/operations/`](word_document_server/operations/) — document logic; tools use `@docx_tool` / `@raw_docx_tool` in [`document.py`](word_document_server/document.py).
-- [`word_document_server/asgi.py`](word_document_server/asgi.py) — ASGI entry for Uvicorn (HTTP MCP).
 
 When adding a tool, implement the operation in `operations/`, register it in `server.py`, and add tests under `tests/`. Prefer a short **MCP integration** test if the tool is user-facing.
 

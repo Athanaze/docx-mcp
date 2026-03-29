@@ -12,10 +12,14 @@ from word_document_server.operations.content import (
 )
 from word_document_server.operations.formatting import (
     format_text, create_style, format_table,
-    set_column_widths, merge_cells, set_table_cell_shading,
+    set_column_widths, merge_cells, merge_cells_horizontal,
+    merge_cells_vertical, set_table_cell_shading,
     apply_table_alternating_rows, highlight_table_header,
     set_cell_alignment, format_cell_text, set_cell_padding,
+    set_table_width, auto_fit_table, set_table_alignment_all,
 )
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
 
 
 @pytest.fixture
@@ -147,6 +151,51 @@ class TestMergeCells:
         doc = Document(doc_with_table)
         # After merge, cell(0,0) and cell(1,1) share the same underlying tc element
         assert doc.tables[0].cell(0, 0)._tc is doc.tables[0].cell(1, 1)._tc
+
+    def test_merge_horizontal(self, doc_with_table):
+        result = merge_cells_horizontal(
+            filename=doc_with_table, block_index=0,
+            row=0, start_col=0, end_col=1,
+        )
+        assert "merged" in result.lower()
+        doc = Document(doc_with_table)
+        assert doc.tables[0].cell(0, 0)._tc is doc.tables[0].cell(0, 1)._tc
+
+    def test_merge_vertical(self, doc_with_table):
+        result = merge_cells_vertical(
+            filename=doc_with_table, block_index=0,
+            col=0, start_row=0, end_row=1,
+        )
+        assert "merged" in result.lower()
+        doc = Document(doc_with_table)
+        assert doc.tables[0].cell(0, 0)._tc is doc.tables[0].cell(1, 0)._tc
+
+
+class TestTableWidthAndLayout:
+    def test_set_table_width_points(self, doc_with_table):
+        r = set_table_width(filename=doc_with_table, block_index=0,
+                            width=400, width_type="points")
+        assert "width" in r.lower()
+
+    def test_set_table_width_auto(self, doc_with_table):
+        r = set_table_width(filename=doc_with_table, block_index=0,
+                            width=0, width_type="auto")
+        assert "width" in r.lower()
+
+    def test_auto_fit_table(self, doc_with_table):
+        r = auto_fit_table(filename=doc_with_table, block_index=0)
+        assert "auto" in r.lower() or "fit" in r.lower()
+
+    def test_set_table_alignment_all(self, doc_with_table):
+        r = set_table_alignment_all(
+            filename=doc_with_table, block_index=0,
+            horizontal="center", vertical="bottom",
+        )
+        assert "alignment" in r.lower()
+        doc = Document(doc_with_table)
+        cell = doc.tables[0].cell(0, 0)
+        assert cell.paragraphs[0].alignment == WD_ALIGN_PARAGRAPH.CENTER
+        assert cell.vertical_alignment == WD_CELL_VERTICAL_ALIGNMENT.BOTTOM
 
 
 class TestCellShading:

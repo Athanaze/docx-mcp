@@ -29,6 +29,9 @@ EXPECTED_TOOL_NAMES = frozenset({
     "merge_cells_horizontal",
     "set_table_width",
     "preview_document",
+    "render_document_pages",
+    "compare_rendered_pages",
+    "list_document_images",
 })
 
 

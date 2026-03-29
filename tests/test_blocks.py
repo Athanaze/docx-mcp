@@ -8,7 +8,20 @@ from word_document_server.operations.blocks import (
     BlockItem, get_block_items, resolve_block,
     resolve_paragraph_block, resolve_table_block,
     find_block, normalize_text, _classify_paragraph,
+    word_count_from_blocks,
 )
+
+
+class TestWordCountFromBlocks:
+    def test_includes_table_cell_text(self, sample_docx):
+        doc = Document(sample_docx)
+        walk = sum(len((p.text or "").split()) for p in doc.paragraphs)
+        wc = word_count_from_blocks(doc)
+        assert wc > walk
+
+    def test_blank_document(self, blank_docx):
+        doc = Document(blank_docx)
+        assert word_count_from_blocks(doc) == 0
 
 
 class TestGetBlockItems:

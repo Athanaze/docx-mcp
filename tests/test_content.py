@@ -38,6 +38,10 @@ class TestDocumentInfo:
         info = json.loads(result)
         assert info["paragraph_count"] > 0
         assert info["table_count"] == 1
+        assert "word_count" in info
+        assert "word_count_paragraph_walk" in info
+        # Unified count includes table cell text; paragraph walk does not.
+        assert info["word_count"] >= info["word_count_paragraph_walk"]
 
     def test_nonexistent(self, tmp_dir):
         result = get_document_info(filename=os.path.join(tmp_dir, "nope.docx"))
@@ -54,6 +58,26 @@ class TestGetText:
         text = get_document_text(filename=sample_docx)
         assert "R0C0" in text
 
+    def test_table_row_and_cell_limits(self, sample_docx):
+        text = get_document_text(
+            filename=sample_docx,
+            include_indices=True,
+            max_table_rows=1,
+            max_cells_per_row=2,
+        )
+        assert "more rows omitted" in text
+        assert "(+1 cells)" in text
+        assert "Row 0:" in text
+        assert "Row 1:" not in text
+
+    def test_table_cell_char_limit(self, sample_docx):
+        text = get_document_text(
+            filename=sample_docx,
+            include_indices=True,
+            max_chars_per_cell=3,
+        )
+        assert "R0C…" in text or "…" in text
+
 
 class TestGetOutline:
     def test_returns_structure(self, sample_docx):
@@ -61,9 +85,17 @@ class TestGetOutline:
         data = json.loads(result)
         blocks = data["blocks"]
         assert len(blocks) > 0
+        assert data.get("total_block_count") == len(blocks)
+        assert data.get("returned_blocks") == len(blocks)
         tables = [b for b in blocks if b["type"] == "table"]
         assert len(tables) == 1
         assert tables[0]["rows"] == 3
+
+    def test_max_blocks_truncates(self, sample_docx):
+        data = json.loads(get_document_outline(filename=sample_docx, max_blocks=3))
+        assert len(data["blocks"]) == 3
+        assert data["truncated"] is True
+        assert data["total_block_count"] > 3
 
 
 class TestGetBlocks:
@@ -289,7 +321,17 @@ class TestFindText:
         result = find_text(filename=sample_docx, text_to_find="paragraph")
         data = json.loads(result)
         assert data["count"] >= 3
+        assert data["returned"] == len(data["matches"])
         assert all("block_index" in m for m in data["matches"])
+
+    def test_max_results_truncates_matches_not_count(self, sample_docx):
+        data = json.loads(
+            find_text(filename=sample_docx, text_to_find="paragraph", max_results=1)
+        )
+        assert data["count"] >= 3
+        assert len(data["matches"]) == 1
+        assert data["returned"] == 1
+        assert data.get("truncated") is True
 
     def test_case_insensitive(self, sample_docx):
         result = find_text(filename=sample_docx, text_to_find="INTRODUCTION",

@@ -20,7 +20,6 @@ requires-python = ">=3.11"
 dependencies = [
     "python-docx>=1.2.0",
     "fastmcp>=2.8.1",
-    "msoffcrypto-tool>=5.4.2",
     "docx2pdf>=0.1.8",
     "python-dotenv>=1.0.0",
 ]
@@ -29,9 +28,6 @@ dependencies = [
 dev = [
     "pytest>=8.4.2",
     "pytest-asyncio>=0.24.0",
-]
-asgi = [
-    "uvicorn[standard]>=0.30.0",
 ]
 
 [project.urls]
@@ -47,6 +43,9 @@ only-include = [
     "word_document_server",
 ]
 sources = ["."]
+
+[dependency-groups]
+dev = []
 
 [project.scripts]
 word_mcp_server = "word_document_server.server:run_server"

@@ -99,6 +99,18 @@ def _block_text(bi):
     return bi.obj.text
 
 
+def word_count_from_blocks(doc):
+    """Word count aligned with get_block_items / find_text (includes table cell text)."""
+    pieces = []
+    for bi in get_block_items(doc):
+        t = _block_text(bi)
+        if t and t.strip():
+            pieces.append(t.strip())
+    if not pieces:
+        return 0
+    return len(" ".join(pieces).split())
+
+
 def find_block(doc, target_text=None, block_index=None, skip_toc=True):
     """Find a block item by index or normalized text search.
 
