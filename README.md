@@ -14,7 +14,58 @@ A Model Context Protocol (MCP) server for creating, reading, and manipulating Mi
 
 Office-Word-MCP-Server implements the [Model Context Protocol](https://modelcontextprotocol.io/) to expose Word document operations as tools and resources. It serves as a bridge between AI assistants and Microsoft Word documents, allowing for document creation, content addition, formatting, and analysis.
 
-The server features a modular architecture that separates concerns into core functionality, tools, and utilities, making it highly maintainable and extensible for future enhancements.
+The server uses a single operations layer ([`word_document_server/operations/`](word_document_server/operations/)) with a unified **`block_index`** for every block-level item (paragraphs, headings, list items, tables) in document order.
+
+## Transports: stdio (desktop) vs HTTP (remote)
+
+| Mode | Use case |
+|------|-----------|
+| **stdio** (default) | Cursor, Claude Desktop, local MCP hosts that spawn a process |
+| **Streamable HTTP** | Remote agents, OpenClaw-style hosts, multiple clients, Docker |
+
+### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MCP_TRANSPORT` | `stdio` | `stdio`, `streamable-http`, or `sse` (legacy) |
+| `MCP_HOST` | `0.0.0.0` | Bind address for HTTP transports |
+| `PORT` / `MCP_PORT` | `8000` | Listen port for HTTP transports |
+| `MCP_PATH` | `/mcp` | HTTP path for Streamable HTTP |
+| `MCP_SSE_PATH` | `/sse` | Path when using `MCP_TRANSPORT=sse` |
+| `DOCUMENT_ROOT` | _(unset)_ | If set, all `.docx` paths are confined to this directory (recommended for servers) |
+
+### HTTP quick start (built-in server)
+
+```bash
+export MCP_TRANSPORT=streamable-http
+export MCP_HOST=127.0.0.1
+export MCP_PORT=8000
+export DOCUMENT_ROOT="$(pwd)/workspace"
+word_mcp_server
+```
+
+MCP endpoint: **`http://<host>:<port>/mcp`** (e.g. `http://127.0.0.1:8000/mcp`).  
+Configure your MCP client for **Streamable HTTP** to this URL. Legacy clients may need `MCP_TRANSPORT=sse`.
+
+**Security:** For **local** HTTP (`127.0.0.1`) or **stdio**, you do not need TLS or encryption from this server—that is outside its scope. If you expose the HTTP endpoint **beyond your machine**, add your own auth/TLS at the edge. See [SECURITY.md](SECURITY.md).
+
+### HTTP with Uvicorn (ASGI)
+
+For production-style deployments (workers, process managers):
+
+```bash
+uv sync --extra asgi
+export DOCUMENT_ROOT="$(pwd)/workspace"
+uvicorn word_document_server.asgi:app --host 0.0.0.0 --port 8000
+```
+
+### Docker
+
+```bash
+docker compose up --build
+```
+
+The container listens on port **8000** and uses `/workspace` as `DOCUMENT_ROOT` (mounted from `./workspace` in the sample [docker-compose.yml](docker-compose.yml)).
 
 ### Example
 
@@ -32,6 +83,8 @@ The server features a modular architecture that separates concerns into core fun
 
 - Create new Word documents with metadata
 - Extract text and analyze document structure
+- **`get_blocks`**: structured JSON per block (text, style, per-run formatting, or full table cell matrix) for agent workflows
+- **`list_document_styles`** / **`set_paragraph_style`**: discover and apply built-in or template styles by name
 - View document properties and statistics
 - List available documents in a directory
 - Create copies of existing documents
@@ -123,32 +176,24 @@ npx -y @smithery/cli install @GongRzhe/Office-Word-MCP-Server --client claude
 
 ### Prerequisites
 
-- Python 3.8 or higher
-- pip package manager
+- Python 3.11 or higher
+- Optional: [uv](https://github.com/astral-sh/uv) for reproducible installs
 
-### Basic Installation
+### Basic installation
 
 ```bash
-# Clone the repository
 git clone https://github.com/GongRzhe/Office-Word-MCP-Server.git
 cd Office-Word-MCP-Server
 
-# Install dependencies
-pip install -r requirements.txt
+# Editable install + dev tools (pytest, pytest-asyncio)
+uv sync --extra dev --extra asgi
+
+# Or with pip
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev,asgi]"
 ```
 
-### Using the Setup Script
-
-Alternatively, you can use the provided setup script which handles:
-
-- Checking prerequisites
-- Setting up a virtual environment
-- Installing dependencies
-- Generating MCP configuration
-
-```bash
-python setup_mcp.py
-```
+Run the server: `word_mcp_server` (or `python word_mcp_server.py`).
 
 ## Usage with Claude for Desktop
 
@@ -371,13 +416,7 @@ set MCP_DEBUG=1     # Windows
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, tests (including optional HTTP E2E), and roadmap.
 
 ## License
 

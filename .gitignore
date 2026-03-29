@@ -1,6 +1,10 @@
 # Project files
 .idea
 .DS_Store
+.cursor/
+
+# Local document sandbox (generated .docx / PDF / PNG from MCP sessions)
+workspace/
 
 # Python-generated files
 __pycache__/

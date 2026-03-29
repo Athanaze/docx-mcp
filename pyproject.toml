@@ -18,23 +18,35 @@ classifiers = [
 ]
 requires-python = ">=3.11"
 dependencies = [
-    "python-docx>=1.1.2",
+    "python-docx>=1.2.0",
     "fastmcp>=2.8.1",
     "msoffcrypto-tool>=5.4.2",
     "docx2pdf>=0.1.8",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
     "pytest>=8.4.2",
+    "pytest-asyncio>=0.24.0",
+]
+asgi = [
+    "uvicorn[standard]>=0.30.0",
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/GongRzhe/Office-Word-MCP-Server.git"
-"Bug Tracker" = "https://github.com/GongRzhe/Office-Word-MCP-Server.git/issues"
+Homepage = "https://github.com/GongRzhe/Office-Word-MCP-Server"
+Repository = "https://github.com/GongRzhe/Office-Word-MCP-Server.git"
+"Bug Tracker" = "https://github.com/GongRzhe/Office-Word-MCP-Server/issues"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
 
 [tool.hatch.build.targets.wheel]
 only-include = [
     "word_document_server",
-    "office_word_mcp_server",
 ]
 sources = ["."]
 
 [project.scripts]
-word_mcp_server = "word_document_server.main:run_server"
+word_mcp_server = "word_document_server.server:run_server"
