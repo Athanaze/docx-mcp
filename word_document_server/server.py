@@ -695,13 +695,13 @@ def register_tools():
 
 def get_transport_config():
     config = {
-        'transport': 'stdio', 'host': '0.0.0.0', 'port': 8000,
+        'transport': 'streamable-http', 'host': '0.0.0.0', 'port': 8000,
         'path': '/mcp', 'sse_path': '/sse',
     }
-    transport = os.getenv('MCP_TRANSPORT', 'stdio').lower()
-    valid = ('stdio', 'streamable-http', 'sse')
+    transport = os.getenv('MCP_TRANSPORT', 'streamable-http').lower()
+    valid = ('streamable-http', 'sse')
     if transport not in valid:
-        transport = 'stdio'
+        transport = 'streamable-http'
     config['transport'] = transport
     config['host'] = os.getenv('MCP_HOST', config['host'])
     config['port'] = int(os.getenv('PORT', os.getenv('MCP_PORT', config['port'])))
@@ -719,9 +719,7 @@ def run_server():
     print(f"Starting Word Document MCP Server ({transport} transport)...")
 
     try:
-        if transport == 'stdio':
-            mcp.run(transport='stdio')
-        elif transport == 'streamable-http':
+        if transport == 'streamable-http':
             mcp.run(transport='streamable-http', host=config['host'],
                      port=config['port'], path=config['path'])
         elif transport == 'sse':

@@ -4,18 +4,9 @@ MCP (Model Context Protocol) server for **.docx** files: create, read, edit, tab
 
 Implementation: **[python-docx](https://python-docx.readthedocs.io/)** + **[FastMCP](https://github.com/jlowin/fastmcp)**. Block-level content is addressed with a single **`block_index`** in document order (paragraphs, headings, list items, tables). See [`word_document_server/operations/`](word_document_server/operations/) and tool registration in [`word_document_server/server.py`](word_document_server/server.py).
 
-## Running the server
+## Running the server (HTTP only)
 
-**Default — stdio** (typical for editors and agents that launch an MCP process):
-
-```bash
-uv sync --extra dev
-uv run word_mcp_server
-```
-
-Configure your MCP client with the command above and working directory set to where your documents should live (or use `DOCUMENT_ROOT`; see below).
-
-**Optional — HTTP** on the same machine or a trusted network:
+Use Streamable HTTP (default) on the same machine or a trusted network:
 
 ```bash
 export MCP_TRANSPORT=streamable-http
@@ -25,16 +16,16 @@ export DOCUMENT_ROOT="$(pwd)/workspace"   # optional sandbox for paths
 uv run word_mcp_server
 ```
 
-Endpoint: `http://<host>:<port>/mcp` (default path; override with `MCP_PATH`). Legacy SSE: `MCP_TRANSPORT=sse` and `MCP_SSE_PATH`.
+Endpoint: `http://<host>:<port>/mcp` (default path; override with `MCP_PATH`). Optional legacy SSE: `MCP_TRANSPORT=sse` and `MCP_SSE_PATH`.
 
 | Variable | Default | Meaning |
 |----------|---------|--------|
-| `MCP_TRANSPORT` | `stdio` | `stdio`, `streamable-http`, or `sse` |
-| `MCP_HOST` / `PORT` / `MCP_PORT` | `0.0.0.0` / `8000` | HTTP bind (when not using stdio) |
+| `MCP_TRANSPORT` | `streamable-http` | `streamable-http` or `sse` |
+| `MCP_HOST` / `PORT` / `MCP_PORT` | `0.0.0.0` / `8000` | HTTP bind host/port |
 | `MCP_PATH` | `/mcp` | Streamable HTTP path |
 | `DOCUMENT_ROOT` | _(unset)_ | If set, `.docx` paths are confined under this directory |
 
-Local stdio or `127.0.0.1` HTTP does not add TLS; that is up to your environment if you expose the service. See [SECURITY.md](SECURITY.md).
+Local `127.0.0.1` HTTP does not add TLS; that is up to your environment if you expose the service. See [SECURITY.md](SECURITY.md).
 
 ## Requirements
 
