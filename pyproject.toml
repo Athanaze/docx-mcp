@@ -20,7 +20,6 @@ requires-python = ">=3.11"
 dependencies = [
     "python-docx>=1.2.0",
     "fastmcp>=2.8.1",
-    "docx2pdf>=0.1.8",
     "python-dotenv>=1.0.0",
 ]
 
@@ -31,9 +30,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/GongRzhe/Office-Word-MCP-Server"
-Repository = "https://github.com/GongRzhe/Office-Word-MCP-Server.git"
-"Bug Tracker" = "https://github.com/GongRzhe/Office-Word-MCP-Server/issues"
+Homepage = "https://github.com/Athanaze/docx-mcp"
+Repository = "https://github.com/Athanaze/docx-mcp.git"
+"Bug Tracker" = "https://github.com/Athanaze/docx-mcp/issues"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -11,7 +11,6 @@ Implementation: **[python-docx](https://python-docx.readthedocs.io/)** + **[Fast
 ```bash
 uv sync --extra dev
 uv run word_mcp_server
-# or: python word_mcp_server.py
 ```
 
 Configure your MCP client with the command above and working directory set to where your documents should live (or use `DOCUMENT_ROOT`; see below).

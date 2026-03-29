@@ -51,7 +51,7 @@ The FastMCP server with SSE transport automatically provides a health check endp
 
 ### Port binding errors
 - **Cause**: Server not using Render's PORT environment variable
-- **Fix**: This has been fixed in the latest version of main.py
+- **Fix**: This is handled by [`word_document_server/server.py`](word_document_server/server.py) via `get_transport_config()` reading `PORT` / `MCP_PORT`
 
 ### Cannot connect to server
 - **Cause**: Health checks failing
